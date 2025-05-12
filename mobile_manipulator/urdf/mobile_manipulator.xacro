@@ -1,0 +1,23 @@
+<?xml version="1.0"?>
+<robot xmlns:xacro="http://ros.org/wiki/xacro" name="mobile_manipulator">
+
+  <!-- Include the Franka URDF from franka_description package -->
+  <xacro:include filename="$(find franka_description)/robots/panda_arm_hand.urdf.xacro"/>
+  <xacro:include filename="$(find mobile_manipulator)/urdf/floating_base.xacro"/>
+  <xacro:include filename="$(find ranger_mini)/urdf/ranger_mini_gazebo_fixed.xacro"/>
+
+  <joint name="base_to_platform" type="fixed">
+    <parent link="base_link"/>
+    <child link="floating_base_link"/>
+    <origin xyz="0 0 0.016" rpy="0 0 3.141592"/>
+  </joint>
+
+  <!-- Connect Custom Platform to Franka Arm -->
+  <joint name="platform_to_franka" type="fixed">
+    <parent link="floating_base_link"/>
+    <child link="panda_link0"/>
+    <origin xyz="0 0 0.214" rpy="0 0 3.141592"/>
+  </joint>
+
+
+</robot>
