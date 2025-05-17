@@ -1,11 +1,32 @@
 <?xml version="1.0"?>
-<robot xmlns:xacro="http://ros.org/wiki/xacro" name="floating_base">
+<robot xmlns:xacro="http://ros.org/wiki/xacro" name="moma_robot">
 
+  <!-- Material Definition -->
   <material name="white">
     <color rgba="1 1 1 1"/>
   </material>
 
-  <!-- Custom Platform Link -->
+  <!-- Base Link (Root) -->
+  <link name="base_link">
+    <visual>
+      <geometry>
+        <box size="0.1 0.1 0.1"/>
+      </geometry>
+      <material name="white"/>
+    </visual>
+    <collision>
+      <geometry>
+        <box size="0.1 0.1 0.1"/>
+      </geometry>
+    </collision>
+    <inertial>
+      <mass value="1.0"/>
+      <origin xyz="0 0 0" rpy="0 0 0"/>
+      <inertia ixx="0.01" ixy="0.0" ixz="0.0" iyy="0.01" iyz="0.0" izz="0.01"/>
+    </inertial>
+  </link>
+
+  <!-- Floating Base Link -->
   <link name="floating_base_link">
     <visual>
       <geometry>
@@ -25,9 +46,11 @@
     </inertial>
   </link>
 
-  <!-- Custom Platform Macro -->
-  <xacro:macro name="floating_base" params="">
-    <link name="floating_base_link"/>
-  </xacro:macro>
+  <!-- Joint: base_link to floating_base_link -->
+  <joint name="base_to_floating" type="floating">
+    <parent link="base_link"/>
+    <child link="floating_base_link"/>
+    <origin xyz="0 0 0.1" rpy="0 0 0"/>
+  </joint>
 
 </robot>

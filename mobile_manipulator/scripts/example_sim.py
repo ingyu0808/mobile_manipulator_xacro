@@ -69,7 +69,7 @@ def step_robot(r: rtb.ERobot, Tep):
     ub = np.r_[r.qdlim[: r.n], 10 * np.ones(6)]
 
     # Solve for the joint velocities dq
-    qd = qp.solve_qp(Q, c, Ain, bin, Aeq, beq, lb=lb, ub=ub)
+    qd = qp.solve_qp(Q, c, Ain, bin, Aeq, beq, lb=lb, ub=ub, solver="osqp")
     qd = qd[: r.n]
 
     if et > 0.5:
@@ -89,8 +89,10 @@ env.launch(realtime=True)
 ax_goal = sg.Axes(0.1)
 env.add(ax_goal)
 
-frankie = rtb.models.FrankieOmni()
+frankie = rtb.models.Moma()
+initial_position = sm.SE3(0, 0, 0.324)  # Z축으로 0.5만큼 이동
 frankie.q = frankie.qr
+frankie.base = initial_position  # 초기 위치를 설정
 env.add(frankie)
 
 arrived = False
