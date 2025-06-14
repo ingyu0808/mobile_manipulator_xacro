@@ -63,10 +63,11 @@ def step_robot(r: rtb.ERobot, Tep):
         c_Ain, c_bin = moma.link_collision_damper(
             collision,
             moma.q[:r.n],
-            0.5,
+            0.3,
             0.05,
-            5.0,
-
+            1.5,
+            start=moma.link_dict["chassis_link"],
+            end=moma.link_dict["panda_hand"],
         )
 
 
@@ -74,17 +75,17 @@ def step_robot(r: rtb.ERobot, Tep):
         # to the collision in the scene
         if c_Ain is not None and c_bin is not None:
 
-            print("c_Ain  , c_bin")
-            print(c_Ain.shape, c_bin.shape)
+            # print("c_Ain  , c_bin")
+            # print(c_Ain.shape, c_bin.shape)
             
 
-            c_Ain = np.c_[c_Ain, np.zeros((c_Ain.shape[0], 1))]   
+            c_Ain = np.c_[c_Ain, np.zeros((c_Ain.shape[0], 3))]   
 
-            print("cal_c_Ain  , cal_c_bin")
-            print(c_Ain.shape, c_bin.shape)  
+            # print("cal_c_Ain  , cal_c_bin")
+            # print(c_Ain.shape, c_bin.shape)  
 
-            print("Ain  , bin")
-            print(Ain.shape, bin.shape)
+            # print("Ain  , bin")
+            # print(Ain.shape, bin.shape)
 
             # Stack the inequality constraints
             Ain = np.r_[Ain, c_Ain]
@@ -92,15 +93,15 @@ def step_robot(r: rtb.ERobot, Tep):
 
     # Linear component of objective function: the manipulability Jacobian
     c = np.concatenate(
-        (-r.jacobm().reshape((r.n)), np.zeros(6))
+        (np.zeros(3), -r.jacobm(start=r.links[5]).reshape((r.n - 3,)), np.zeros(6))
     )
 
     # Get base to face end-effector
-    # kε = 0.5
-    # bTe = r.fkine(r.q, include_base=False).A
-    # θε = math.atan2(bTe[1, -1], bTe[0, -1])
-    # ε = kε * θε
-    # c[0] = -ε
+    kε = 0.5
+    bTe = r.fkine(r.q, include_base=False).A
+    θε = math.atan2(bTe[1, -1], bTe[0, -1])
+    ε = kε * θε
+    c[0] = -ε
 
     # The lower and upper bounds on the joint velocity and slack variable
     lb = -np.r_[r.qdlim[: r.n], 10 * np.ones(6)]
@@ -128,28 +129,36 @@ ax_goal = sg.Axes(0.1)
 env.add(ax_goal)
 
 
-moma = rtb.models.Momaintegrate()
+moma = rtb.models.Moma()
+initial_position = sm.SE3(0, 0, 0.324)  # Z축으로 0.324만큼 이동
 moma.q = moma.qr
+moma.base = initial_position  # 초기 위치를 설정
 env.add(moma)
 
-s0 = sg.Cuboid(scale=(0.1, 1.0, 0.4), pose=sm.SE3(3.0, 0.0, 0.5))
+s0 = sg.Cuboid(scale=(6.0, 0.1, 20.0), pose=sm.SE3(0.0, 0.6, 0.0))
 s0.v = [0, 0, 0, 0, 0, 0]
 
-collisions = [s0]
+s1 = sg.Cuboid(scale=(6.0, 0.1, 20.0), pose=sm.SE3(0.0, -0.6, 0.0))
+s1.v = [0, 0, 0, 0, 0, 0]
+
+collisions = [s0,s1]
 
 env.add(s0)
+env.add(s1)
 
 arrived = False
-dt = 0.025
+dt = 0.05
 
 
-# Behind
 env.set_camera_pose([-2, 3, 0.7], [-2, 0.0, 0.5])
+
+# ✅ 절대 좌표와 방향 설정
 goal_position = [6, -1, 0.6]
-goal_orientation_rpy = [np.pi, np.pi, 0]  # world 기준 RPY
+goal_orientation_rpy = [0, np.pi, 0]  # world 기준 RPY
 
 wTep = sm.SE3(goal_position) * sm.SE3.RPY(goal_orientation_rpy, order='xyz')
 
+# 목표축 표시
 ax_goal.T = wTep
 env.step()
 
@@ -161,6 +170,7 @@ while not arrived:
 
     # Reset bases
     base_new = moma.fkine(moma._q, end=moma.links[3]).A
+    # print(moma.links[3])
     moma._T = base_new
     moma.q[:3] = 0
 

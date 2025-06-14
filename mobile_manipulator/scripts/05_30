@@ -1,0 +1,54 @@
+import numpy as np
+from scipy.optimize import minimize
+import roboticstoolbox as rtb
+import spatialmath as sm
+
+# 로봇 모델 불러오기
+robot = rtb.models.Panda()
+
+# 목표 end-effector pose 설정 (기본자세에서 따옴)
+q_target = robot.qr
+T_goal = robot.fkine(q_target)
+
+# manipulability 계산 함수
+def manipulability(q):
+    try:
+        return robot.manipulability(q)
+    except:
+        return 0.0
+
+# 목적함수: manipulability 최대화 → 음수 부호
+def objective(q):
+    return -manipulability(q)
+
+# 등식 제약조건: fkine(q) == T_goal (6D pose error = 0)
+def pose_constraint(q):
+    T_current = robot.fkine(q)
+    error = (T_current.inv() * T_goal).vec()  # [x,y,z,roll,pitch,yaw]
+    return error
+
+# 제약 및 경계 설정
+constraints = {'type': 'eq', 'fun': pose_constraint}
+bounds = robot.qlim.T.tolist()
+
+# 초기값: zero pose
+q_init = robot.qz
+
+# 최적화 실행
+result = minimize(
+    objective, q_init, method='SLSQP',
+    bounds=bounds, constraints=constraints,
+    options={'maxiter': 300, 'disp': True}
+)
+
+# 결과 출력
+q_opt = result.x
+w_opt = manipulability(q_opt)
+
+print("\n[최적화 결과]")
+print(f"- 최적 manipulability: {w_opt:.4f}")
+print(f"- 최적 joint 구성: {np.round(q_opt, 4)}")
+
+# 시각화
+robot.q = q_opt
+robot.plot(block=True)

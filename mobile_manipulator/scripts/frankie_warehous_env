@@ -1,0 +1,200 @@
+import swift
+import roboticstoolbox as rtb
+import spatialgeometry as sg
+import spatialmath as sm
+import qpsolvers as qp
+import numpy as np
+import math
+import matplotlib.pyplot as plt
+import random
+
+
+
+# QP 제어 함수 정의
+def step_robot(r: rtb.ERobot, Tep, env, step_count):
+    global collision_markers
+
+    wTe = r.fkine(r.q)
+    eTep = np.linalg.inv(wTe) @ Tep
+    et = np.sum(np.abs(eTep[:3, -1]))
+    Y = 0.01
+
+    Q = np.eye(r.n + 6)
+    Q[: r.n, : r.n] *= Y
+    Q[:3, :3] *= 1.0 / et
+    Q[r.n :, r.n :] = (1.0 / et) * np.eye(6)
+
+    v, _ = rtb.p_servo(wTe, Tep, 1.5)
+    v[3:] *= 1.3
+
+    Aeq = np.c_[r.jacobe(r.q), np.eye(6)]
+    beq = v.reshape((6,))
+
+    Ain = np.zeros((r.n + 6, r.n + 6))
+    bin = np.zeros(r.n + 6)
+    ps = 0.1
+    pi = 0.9
+    Ain[: r.n, : r.n], bin[: r.n] = r.joint_velocity_damper(ps, pi, r.n)
+
+    for collision in collisions:
+        c_Ain, c_bin = r.link_collision_damper(
+            collision,
+            r.q[:r.n],
+            0.1,
+            0.05,
+            1.0,
+            start=r.link_dict["chassis_link"],
+            end=r.link_dict["panda_link8"],
+        )
+        if c_Ain is not None and c_bin is not None:
+
+            c_Ain = np.c_[c_Ain, np.zeros((c_Ain.shape[0], 5))]
+            Ain = np.r_[Ain, c_Ain]
+            bin = np.r_[bin, c_bin]
+
+    c = np.concatenate((np.zeros(3), -r.jacobm(start=r.links[5]).reshape((r.n - 3,)), np.zeros(6)))
+
+    lb = -np.r_[r.qdlim[: r.n], 10 * np.ones(6)]
+    ub = np.r_[r.qdlim[: r.n], 10 * np.ones(6)]
+
+    qd = qp.solve_qp(Q, c, Ain, bin, Aeq, beq, lb=lb, ub=ub, solver="quadprog")
+    if qd is None:
+        print(f"[QP ERROR] QP failed at step {step_count}")
+        return True, np.zeros(r.n)
+
+    qd = qd[: r.n]
+    if et > 0.5:
+        qd *= 0.7 / et
+    else:
+        qd *= 1.4
+
+    return (et < 0.02), qd
+
+manip_log = []
+time_log = []
+dt = 0.05
+
+plt.ion()
+fig, ax = plt.subplots()
+line, = ax.plot([], [], lw=2)
+ax.set_xlabel("Time (s)")
+ax.set_ylabel("Manipulability")
+ax.set_ylim(0, 2)
+ax.set_xlim(0, 1)
+plt.title("Manipulability Over Time")
+plt.grid(True)
+
+def update_plot(t, m):
+    time_log.append(t)
+    manip_log.append(m)
+    line.set_data(time_log, manip_log)
+    ax.set_xlim(0, max(0.1, t))
+    ax.set_ylim(0.08, max(0.13, max(manip_log)))
+    plt.draw()
+    plt.pause(0.001)
+
+env = swift.Swift()
+env.launch(realtime=True)
+
+ax_goal = sg.Axes(0.1)
+env.add(ax_goal)
+
+moma = rtb.models.FrankieOmni()
+panda = rtb.models.Panda()
+moma.q = moma.qr
+env.add(moma)
+
+
+
+
+collisions = []
+num_shelves_per_side = 4
+shelf_width, shelf_depth, shelf_height = 1.2, 0.4, 1.5
+level_spacing = shelf_height / 4
+x_spacing = 1.0
+shelf_positions = []
+
+for i in range(num_shelves_per_side):
+    for side in [-1.0, 1.0]:
+        x_pos = (i + 1) * x_spacing
+        sx, sy = x_pos, side
+        shelf_positions.append((sx, sy))
+
+        # 기둥 추가
+        for dx in [-shelf_width/2 + 0.05, shelf_width/2 - 0.05]:
+            for dy in [-shelf_depth/2 + 0.05, shelf_depth/2 - 0.05]:
+                pillar = sg.Cuboid(
+                    scale=[0.05, 0.05, level_spacing * 2],
+                    pose=sm.SE3(sx + dx, sy + dy, level_spacing),
+                    color=[0.3, 0.3, 0.3]
+                )
+                # env.add(pillar)
+                # collisions.append(pillar)
+
+        # 선반 판넬 추가
+        for j in [1, 2]:
+            z = j * level_spacing
+            panel = sg.Cuboid(
+                scale=[shelf_width, shelf_depth, 0.03],
+                pose=sm.SE3(sx, sy, z),
+                color=[0.6, 0.4, 0.2]
+            )
+            # env.add(panel)
+            # collisions.append(panel)
+
+        # ⚠️ 선반 벽 추가 (전체 높이)
+        wall = sg.Cuboid(
+            scale=[shelf_width, shelf_depth, shelf_height/2],
+            pose=sm.SE3(sx, sy, shelf_height / 4),
+            color=[0.8, 0.8, 0.8, 1]  # 반투명한 벽으로 표현
+        )
+        env.add(wall)
+        collisions.append(wall)
+
+
+candidate_shelves = shelf_positions
+random_shelf = random.choice(candidate_shelves)
+goal_x = random_shelf[0]
+goal_y = random_shelf[1]
+panel_thickness = 0.03
+box_height = 0.05
+goal_z = 2 * level_spacing + panel_thickness / 2 + box_height / 2
+
+goal_box = sg.Cuboid(scale=[box_height] * 3, pose=sm.SE3(goal_x, goal_y, goal_z), color=[1, 0, 0])
+env.add(goal_box)
+
+rpy = [(np.pi/2), (np.pi), 0] if goal_y > 0 else [-(np.pi/2), (np.pi), 0]
+wTep = sm.SE3(goal_x, goal_y, goal_z) * sm.SE3.RPY(rpy, order='xyz')
+ax_goal.T = wTep
+env.step()
+
+env.set_camera_pose([-4.5, 4.5, 1.2], [0, 0.0, 0.6])
+
+arrived = False
+step_count = 0
+
+while not arrived:
+    try:
+        arrived, moma.qd = step_robot(moma, wTep.A, env, step_count)
+    except Exception as e:
+        print(f"[FATAL ERROR at step {step_count}] {e}")
+        moma.qd = np.zeros(moma.n)
+        break
+
+    J = panda.jacobe(moma.q[3:10])
+    w = np.sqrt(np.linalg.det(J @ J.T))
+    update_plot(step_count * dt, w)
+
+    try:
+        env.step(dt)
+    except Exception as e:
+        print(f"[Swift Step ERROR] {e}")
+        break
+
+    base_new = moma.fkine(moma._q, end=moma.links[3]).A
+    moma._T = base_new
+    moma.q[:3] = 0
+    step_count += 1
+
+plt.ioff()
+env.hold()

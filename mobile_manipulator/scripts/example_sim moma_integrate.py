@@ -63,10 +63,11 @@ def step_robot(r: rtb.ERobot, Tep):
         c_Ain, c_bin = moma.link_collision_damper(
             collision,
             moma.q[:r.n],
-            0.5,
-            0.05,
-            5.0,
-
+            0.1,
+            0.03,
+            1.0,
+            start=moma.link_dict["base_link"],
+            end=moma.link_dict["panda_hand"],
         )
 
 
@@ -78,7 +79,7 @@ def step_robot(r: rtb.ERobot, Tep):
             print(c_Ain.shape, c_bin.shape)
             
 
-            c_Ain = np.c_[c_Ain, np.zeros((c_Ain.shape[0], 1))]   
+            c_Ain = np.c_[c_Ain, np.zeros((c_Ain.shape[0], 4))]   
 
             print("cal_c_Ain  , cal_c_bin")
             print(c_Ain.shape, c_bin.shape)  
@@ -92,10 +93,10 @@ def step_robot(r: rtb.ERobot, Tep):
 
     # Linear component of objective function: the manipulability Jacobian
     c = np.concatenate(
-        (-r.jacobm().reshape((r.n)), np.zeros(6))
+        (np.zeros(3), -r.jacobm(start=r.links[4]).reshape((r.n - 3,)), np.zeros(6))
     )
 
-    # Get base to face end-effector
+    # # Get base to face end-effector
     # kε = 0.5
     # bTe = r.fkine(r.q, include_base=False).A
     # θε = math.atan2(bTe[1, -1], bTe[0, -1])
@@ -145,11 +146,10 @@ dt = 0.025
 
 # Behind
 env.set_camera_pose([-2, 3, 0.7], [-2, 0.0, 0.5])
-goal_position = [6, -1, 0.6]
-goal_orientation_rpy = [np.pi, np.pi, 0]  # world 기준 RPY
-
-wTep = sm.SE3(goal_position) * sm.SE3.RPY(goal_orientation_rpy, order='xyz')
-
+wTep = moma.fkine(moma.q) * sm.SE3.Rz(np.pi)
+wTep.A[:3, :3] = np.diag([-1, 1, -1])
+wTep.A[0, -1] += 4.0
+wTep.A[2, -1] += 0.25
 ax_goal.T = wTep
 env.step()
 
@@ -159,9 +159,9 @@ while not arrived:
     arrived, moma.qd = step_robot(moma, wTep.A)
     env.step(dt)
 
-    # Reset bases
-    base_new = moma.fkine(moma._q, end=moma.links[3]).A
-    moma._T = base_new
-    moma.q[:3] = 0
+    # # Reset bases
+    # base_new = moma.fkine(moma._q, end=moma.links[2]).A
+    # moma._T = base_new
+    # moma.q[:2] = 0
 
 env.hold()

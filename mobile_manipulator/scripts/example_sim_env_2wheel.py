@@ -24,7 +24,7 @@ def step_robot(r: rtb.ERobot, Tep):
 
     # Joint velocity component of Q
     Q[: r.n, : r.n] *= Y
-    Q[:3, :3] *= 1.0 / et
+    Q[:2, :2] *= 1.0 / et
 
     # Slack component of Q
     Q[r.n :, r.n :] = (1.0 / et) * np.eye(6)
@@ -61,12 +61,13 @@ def step_robot(r: rtb.ERobot, Tep):
         # Form the velocity damper inequality contraint for each collision
         # object on the robot to the collision in the scene
         c_Ain, c_bin = moma.link_collision_damper(
-            collision,
-            moma.q[:r.n],
-            0.5,
-            0.05,
-            5.0,
-
+            collision,                    
+            moma.q[:r.n],                 
+            0.5,             # di: 속도 감쇠기가 작동하기 시작하는 영향 거리 (influence distance)
+            0.05,            # ds: 충돌 형상에 접근 가능한 최소 거리 (safety margin)
+            1.5,             # xi: 감쇠 이득 (velocity damper gain)
+            start=moma.link_dict["chassis_link"], 
+            end=moma.link_dict["panda_hand"],      
         )
 
 
@@ -74,17 +75,17 @@ def step_robot(r: rtb.ERobot, Tep):
         # to the collision in the scene
         if c_Ain is not None and c_bin is not None:
 
-            print("c_Ain  , c_bin")
-            print(c_Ain.shape, c_bin.shape)
+            # print("c_Ain  , c_bin")
+            # print(c_Ain.shape, c_bin.shape)
             
 
-            c_Ain = np.c_[c_Ain, np.zeros((c_Ain.shape[0], 1))]   
+            c_Ain = np.c_[c_Ain, np.zeros((c_Ain.shape[0], 2))]   
 
-            print("cal_c_Ain  , cal_c_bin")
-            print(c_Ain.shape, c_bin.shape)  
+            # print("cal_c_Ain  , cal_c_bin")
+            # print(c_Ain.shape, c_bin.shape)  
 
-            print("Ain  , bin")
-            print(Ain.shape, bin.shape)
+            # print("Ain  , bin")
+            # print(Ain.shape, bin.shape)
 
             # Stack the inequality constraints
             Ain = np.r_[Ain, c_Ain]
@@ -92,15 +93,15 @@ def step_robot(r: rtb.ERobot, Tep):
 
     # Linear component of objective function: the manipulability Jacobian
     c = np.concatenate(
-        (-r.jacobm().reshape((r.n)), np.zeros(6))
+        (np.zeros(2), -r.jacobm(start=r.links[4]).reshape((r.n - 2,)), np.zeros(6))
     )
 
     # Get base to face end-effector
-    # kε = 0.5
-    # bTe = r.fkine(r.q, include_base=False).A
-    # θε = math.atan2(bTe[1, -1], bTe[0, -1])
-    # ε = kε * θε
-    # c[0] = -ε
+    kε = 0.5
+    bTe = r.fkine(r.q, include_base=False).A
+    θε = math.atan2(bTe[1, -1], bTe[0, -1])
+    ε = kε * θε
+    c[0] = -ε
 
     # The lower and upper bounds on the joint velocity and slack variable
     lb = -np.r_[r.qdlim[: r.n], 10 * np.ones(6)]
@@ -128,28 +129,36 @@ ax_goal = sg.Axes(0.1)
 env.add(ax_goal)
 
 
-moma = rtb.models.Momaintegrate()
+moma = rtb.models.Moma2()
+initial_position = sm.SE3(0, 0, 0.324)  # Z축으로 0.324만큼 이동
 moma.q = moma.qr
+moma.base = initial_position  # 초기 위치를 설정
 env.add(moma)
 
-s0 = sg.Cuboid(scale=(0.1, 1.0, 0.4), pose=sm.SE3(3.0, 0.0, 0.5))
+s0 = sg.Cuboid(scale=(20.0, 0.1, 20.0), pose=sm.SE3(0.0, 2.0, 0.0))
 s0.v = [0, 0, 0, 0, 0, 0]
 
-collisions = [s0]
+s1 = sg.Cuboid(scale=(20.0, 0.1, 20.0), pose=sm.SE3(0.0, -2.0, 0.0))
+s1.v = [0, 0, 0, 0, 0, 0]
+
+collisions = [s0,s1]
 
 env.add(s0)
+env.add(s1)
 
 arrived = False
-dt = 0.025
+dt = 0.05
 
 
-# Behind
 env.set_camera_pose([-2, 3, 0.7], [-2, 0.0, 0.5])
-goal_position = [6, -1, 0.6]
-goal_orientation_rpy = [np.pi, np.pi, 0]  # world 기준 RPY
+
+# ✅ 절대 좌표와 방향 설정
+goal_position = [3, 0.5, 1.0]
+goal_orientation_rpy = [0, (np.pi), -(np.pi/2)]  # world 기준 RPY
 
 wTep = sm.SE3(goal_position) * sm.SE3.RPY(goal_orientation_rpy, order='xyz')
 
+# 목표축 표시
 ax_goal.T = wTep
 env.step()
 
@@ -160,8 +169,9 @@ while not arrived:
     env.step(dt)
 
     # Reset bases
-    base_new = moma.fkine(moma._q, end=moma.links[3]).A
+    base_new = moma.fkine(moma._q, end=moma.links[2]).A
+    # print(moma.links[2])
     moma._T = base_new
-    moma.q[:3] = 0
+    moma.q[:2] = 0
 
 env.hold()
